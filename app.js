@@ -12,6 +12,8 @@
   const STORE_KEY = "fleeto.rides.v1";
   const LIMIT_KEY = "fleeto.limit.v1";
   const VOICE_KEY = "fleeto.voice.v1";
+  const ROADS_KEY = "fleeto.roads.v1";
+  const LIMIT_SOURCE_LABEL = { posted: "posted limit", "road type": "typical for this road type", setting: "your fallback setting" };
   const RIDES_WITH_LOG = 5; // keep the full sensor log only for the newest rides, to stay within browser storage
   const MAX_SAVED_RIDES = 20;
   const DEMO_SPEEDUP = 30;
@@ -170,8 +172,23 @@
       timers: [],
       watchId: null,
       wakeLock: null,
+      // Road limits from OpenStreetMap (live rides only; the demo carries its own).
+      roads: mode === "live" && $("roadsInput").checked && window.RoadData ? new window.RoadData.RoadLimits() : null,
     };
     $("limitSign").textContent = ride.analyzer.cfg.speedLimitKmh;
+    $("roadInfo").textContent = "";
+    if (ride.roads) {
+      const r = ride;
+      setChip($("roadChip"), "Roads: loading", "");
+      r.roads.onStatus = () => {
+        if (ride !== r) return;
+        const st = r.roads.status();
+        if (st === "ready") setChip($("roadChip"), "Roads: OpenStreetMap", "ok");
+        else if (st === "failed") setChip($("roadChip"), `Roads: offline, using ${r.analyzer.cfg.speedLimitKmh}`, "warn");
+      };
+    } else {
+      setChip($("roadChip"), mode === "demo" ? "Roads: simulated" : `Roads: off, using ${ride.analyzer.cfg.speedLimitKmh}`, mode === "demo" ? "ok" : "");
+    }
     $("feed").replaceChildren();
     $("rideNotice").hidden = true;
     $("demoChip").hidden = mode !== "demo";
@@ -218,7 +235,14 @@
   function onPosition(p) {
     if (!ride || ride.mode !== "live") return;
     const c = p.coords;
-    ride.analyzer.addFix({ t: p.timestamp, lat: c.latitude, lon: c.longitude, speed: c.speed, heading: c.heading, accuracy: c.accuracy });
+    const heading = Number.isFinite(c.heading) ? c.heading : null;
+    const fix = { t: p.timestamp, lat: c.latitude, lon: c.longitude, speed: c.speed, heading, accuracy: c.accuracy };
+    if (ride.roads && c.accuracy <= 50) {
+      const kmh = c.speed != null && c.speed >= 0 ? c.speed * 3.6 : ride.analyzer.lastKmh;
+      const road = ride.roads.lookup({ lat: c.latitude, lon: c.longitude, heading, kmh });
+      if (road) Object.assign(fix, { limitKmh: road.limitKmh, limitSource: road.source, road: road.name });
+    }
+    ride.analyzer.addFix(fix);
     const acc = Math.round(c.accuracy);
     setChip($("gpsChip"), `GPS: ±${acc} m`, acc <= CONFIG.maxFixAccuracyM ? "ok" : "warn");
     $("r-acc").textContent = `±${acc} m`;
@@ -319,6 +343,8 @@
     const { stats, score, live } = ride.analyzer.snapshot();
     $("speedNow").textContent = Math.round(live.kmh);
     $("speedBox").classList.toggle("over", live.overLimit);
+    $("limitSign").textContent = Math.round(live.limitKmh);
+    $("roadInfo").textContent = (live.road ? live.road + " · " : "") + LIMIT_SOURCE_LABEL[live.limitSource];
     renderClock();
     $("distNow").textContent = `${stats.distanceKm.toFixed(1)} km`;
     $("scoreNow").textContent = stats.distanceKm >= 0.2 && score.overall != null ? score.overall : "–";
@@ -340,7 +366,7 @@
 
     // Speak when the rider goes over the limit (at most every 30 s of ride time).
     if (live.overLimit && !ride.wasOver && ride.clockT - ride.lastOverSayT > 30000) {
-      say(`Over ${ride.analyzer.cfg.speedLimitKmh}`);
+      say(`Over ${Math.round(live.limitKmh)}`);
       ride.lastOverSayT = ride.clockT;
     }
     ride.wasOver = live.overLimit;
@@ -408,7 +434,9 @@
       ? "No GPS data was recorded, so there is nothing to score."
       : !sc.enoughData
         ? `Short ride (under ${CONFIG.minRideKm} km). Treat this score as a rough guide only.`
-        : `Speed limit used: ${s.speedLimitKmh} km/h.`;
+        : (s.pctLimitPosted || 0) + (s.pctLimitRoadType || 0) > 0
+          ? `Speed limits from ${r.mode === "demo" ? "simulated" : "OpenStreetMap"} road data, and ${s.speedLimitKmh} km/h where no road was found.`
+          : `Speed limit used: ${s.speedLimitKmh} km/h on every road.`;
     if (s.gapMin >= 0.5) {
       $("sumNote").textContent += ` GPS was lost for ${Math.round(s.gapMin)} min (screen locked or app in the background), so part of the ride is missing.`;
     }
@@ -480,7 +508,7 @@
       if (run.length > 1) L.polyline(run.map((p) => [p[0], p[1]]), { color: over ? col("--high") : col("--good"), weight: 6, opacity: 0.9 }).addTo(layer);
     };
     // A segment takes the colour of the speed at its end point, as in the canvas drawing.
-    const isOver = (p) => p[2] > r.stats.speedLimitKmh;
+    const isOver = (p) => p[2] > (p[3] || r.stats.speedLimitKmh);
     let runOver = isOver(pts[1]);
     for (let i = 1; i < pts.length; i++) {
       if (isOver(pts[i]) !== runOver) { flush(runOver); run = [pts[i - 1]]; runOver = isOver(pts[i]); }
@@ -539,7 +567,7 @@
     for (let i = 1; i < pts.length; i++) {
       const [x0, y0] = proj(pts[i - 1][0], pts[i - 1][1]);
       const [x1, y1] = proj(pts[i][0], pts[i][1]);
-      ctx.strokeStyle = pts[i][2] > r.stats.speedLimitKmh ? col("--high") : col("--good");
+      ctx.strokeStyle = pts[i][2] > (pts[i][3] || r.stats.speedLimitKmh) ? col("--high") : col("--good");
       ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
     }
     const dot = (lat, lon, fill, label, textColor) => {
@@ -576,9 +604,10 @@
       while (i + 1 < r.log.length && r.log[i + 1].t <= e.t) i++;
       eventsAt[i].push(EVENT_INFO[e.type].name);
     }
-    const head = "time,seconds_from_start,lat,lon,speed_kmh,gps_accuracy_m,heading_deg,speed_change_ms2,sideways_ms2,events";
+    const cell = (v) => (v == null ? "" : /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v));
+    const head = "time,seconds_from_start,lat,lon,speed_kmh,speed_limit_kmh,limit_source,road,gps_accuracy_m,heading_deg,speed_change_ms2,sideways_ms2,events";
     const rows = r.log.map((f, i) => [new Date(f.t).toISOString(), ((f.t - t0) / 1000).toFixed(1), f.lat, f.lon, f.kmh,
-      f.acc ?? "", f.heading ?? "", f.accel ?? "", f.lateral ?? "", eventsAt[i].join("; ")].join(","));
+      f.limit, f.limitSource, f.road, f.acc, f.heading, f.accel, f.lateral, eventsAt[i].join("; ")].map(cell).join(","));
     return saveFile(`${fileStem(r)}.csv`, [head, ...rows].join("\n"), "text/csv");
   }
 
@@ -628,6 +657,10 @@
     renderHome();
   });
   try { const v = localStorage.getItem(VOICE_KEY); if (v) $("voiceInput").checked = v === "on"; } catch (e) { /* ignore */ }
+  try { const v = localStorage.getItem(ROADS_KEY); if (v) $("roadsInput").checked = v === "on"; } catch (e) { /* ignore */ }
+  $("roadsInput").addEventListener("change", () => {
+    try { localStorage.setItem(ROADS_KEY, $("roadsInput").checked ? "on" : "off"); } catch (e) { /* ignore */ }
+  });
   $("voiceInput").addEventListener("change", () => {
     try { localStorage.setItem(VOICE_KEY, $("voiceInput").checked ? "on" : "off"); } catch (e) { /* ignore */ }
   });

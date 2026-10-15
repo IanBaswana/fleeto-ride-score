@@ -171,6 +171,7 @@ p { margin: 0; }
   display: grid; place-items: center;
   font: 700 1.7rem/1 var(--font-display); font-variant-numeric: tabular-nums;
 }
+.road-info { margin-top: -4px; min-height: 1.2em; overflow-wrap: anywhere; }
 .stats3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .stat { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .stat b { font: 600 1.6rem/1 var(--font-display); font-variant-numeric: tabular-nums; }

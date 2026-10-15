@@ -1,0 +1,12 @@
+{
+  "name": "Fleeto Ride Score",
+  "short_name": "Ride Score",
+  "description": "Prototype: score a two-wheeler ride from phone GPS and motion sensors.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f2f4f6",
+  "theme_color": "#f2a007",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

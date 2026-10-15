@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Fleeto Ride Score</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="theme-color" content="#f2a007">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;600&family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Mono&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<!-- BODY START -->
+<main class="app">
+  <header class="topbar">
+    <div class="wordmark">Fleeto<span>.</span></div>
+    <div class="eyebrow">Ride safety score · prototype</div>
+  </header>
+
+  <!-- HOME -->
+  <section id="home" class="screen">
+    <div id="sensorNotice" class="notice" hidden></div>
+
+    <div class="panel">
+      <h2>Score your next ride</h2>
+      <p class="muted">Put the phone in its handlebar mount, screen up, then tap Start. The app reads GPS speed and the motion sensors while you ride. It keeps everything on this phone.</p>
+      <button id="startBtn" class="btn primary big" type="button">Start ride</button>
+      <button id="demoBtn" class="btn" type="button">Play a demo ride</button>
+    </div>
+
+    <div class="panel">
+      <div class="field">
+        <label for="limitInput"><h3>Speed limit</h3><span class="muted small">One limit for the whole ride. Placeholder until we add road data.</span></label>
+        <div><input id="limitInput" type="number" inputmode="numeric" min="20" max="120" step="5" value="50"> <span class="muted">km/h</span></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>Your rides</h3>
+      <ul id="rideList" class="ride-list"></ul>
+      <p id="noRides" class="muted small">No rides yet. Your first ride shows here with its score. Rides stay on this phone only.</p>
+    </div>
+
+    <div class="panel">
+      <h3>How the score works</h3>
+      <p class="muted small">Each behaviour gets its own score from 0 to 100. The ride score is the weighted average. All limits and weights are placeholders until we calibrate them with real rides.</p>
+      <ul id="rulesList" class="rules"></ul>
+    </div>
+
+    <div class="panel">
+      <h3>Before you ride</h3>
+      <ul class="muted small" style="margin:0; padding-left:1.2em; display:flex; flex-direction:column; gap:6px">
+        <li>Use Chrome on Android, or Safari on iPhone. Allow location and motion when asked.</li>
+        <li>Keep this screen open during the ride. The app asks the phone to keep the screen on. If the screen locks or you switch apps, the browser stops sending GPS.</li>
+        <li>Mount the phone firmly. A loose phone looks like phone use.</li>
+        <li>Do not touch the phone while you ride. Stop first, then tap Stop ride.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- RIDE -->
+  <section id="ride" class="screen" hidden>
+    <div class="chips">
+      <span id="gpsChip" class="chip">GPS: waiting</span>
+      <span id="motionChip" class="chip">Motion: waiting</span>
+      <span id="wakeChip" class="chip">Screen: –</span>
+      <span id="demoChip" class="chip warn" hidden>Demo ride, 30× speed</span>
+    </div>
+    <div id="rideNotice" class="notice error" hidden></div>
+
+    <div class="panel">
+      <div class="speedo">
+        <div id="speedBox" class="speed"><b id="speedNow" class="num">0</b><span>km/h</span></div>
+        <div class="limit-sign" id="limitSign" title="Speed limit">50</div>
+      </div>
+      <div class="stats3">
+        <div class="stat"><span class="eyebrow">Time</span><b id="timeNow">0:00</b></div>
+        <div class="stat"><span class="eyebrow">Distance</span><b id="distNow">0.0 km</b></div>
+        <div class="stat"><span class="eyebrow">Score now</span><b id="scoreNow">–</b></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <span class="eyebrow">Events this ride</span>
+      <div class="counters">
+        <div class="counter" id="c-braking"><b>0</b><span>Harsh brakes</span></div>
+        <div class="counter" id="c-acceleration"><b>0</b><span>Harsh starts</span></div>
+        <div class="counter" id="c-cornering"><b>0</b><span>Sharp corners</span></div>
+        <div class="counter" id="c-speeding"><b>0</b><span>Speeding</span></div>
+        <div class="counter" id="c-phone"><b>0</b><span>Phone use</span></div>
+      </div>
+      <ul id="feed" class="feed"></ul>
+    </div>
+
+    <div class="panel">
+      <span class="eyebrow">Live sensor readings</span>
+      <dl class="readings">
+        <dt>GPS accuracy</dt><dd id="r-acc">–</dd>
+        <dt>Speed change (GPS)</dt><dd id="r-accel">–</dd>
+        <dt>Sideways accel in turns (GPS)</dt><dd id="r-lat">–</dd>
+        <dt>Phone acceleration</dt><dd id="r-motion">–</dd>
+        <dt>Phone rotation</dt><dd id="r-rot">–</dd>
+        <dt>GPS fixes used / rejected</dt><dd id="r-fixes">–</dd>
+      </dl>
+    </div>
+
+    <div class="stopbar">
+      <div class="row">
+        <button id="skipBtn" class="btn" type="button" hidden>Skip to end</button>
+        <button id="stopBtn" class="btn stop big" type="button">Stop ride</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- SUMMARY -->
+  <section id="summary" class="screen" hidden>
+    <div class="panel">
+      <div class="hero">
+        <svg class="dial" viewBox="0 0 132 132" role="img" aria-labelledby="dialLabel">
+          <title id="dialLabel">Ride score</title>
+          <circle class="track" cx="66" cy="66" r="54" fill="none" stroke-width="12"></circle>
+          <circle id="dialArc" cx="66" cy="66" r="54" fill="none" stroke-width="12" stroke-linecap="round"
+                  transform="rotate(-90 66 66)" stroke-dasharray="0 340"></circle>
+          <text id="dialNum" x="66" y="78" text-anchor="middle" font-size="40">–</text>
+        </svg>
+        <div style="display:flex; flex-direction:column; gap:6px; min-width:0">
+          <span class="eyebrow" id="sumDate">Ride</span>
+          <span class="band-label" id="sumBand">–</span>
+          <span class="muted small" id="sumNote"></span>
+        </div>
+      </div>
+      <div class="facts">
+        <div class="stat"><span class="eyebrow">Distance</span><b id="sumDist">–</b></div>
+        <div class="stat"><span class="eyebrow">Riding time</span><b id="sumTime">–</b></div>
+        <div class="stat"><span class="eyebrow">Average speed</span><b id="sumAvg">–</b></div>
+        <div class="stat"><span class="eyebrow">Top speed</span><b id="sumMax">–</b></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>Score by behaviour</h3>
+      <div id="compList"></div>
+    </div>
+
+    <div class="panel">
+      <h3>Route</h3>
+      <canvas id="routeCanvas" class="route" width="800" height="600" aria-label="Route of the ride with event markers"></canvas>
+      <div class="legend">
+        <span><i style="background:var(--good)"></i>At or under limit</span>
+        <span><i style="background:var(--high)"></i>Over limit</span>
+        <span><span class="mark">B</span> brake</span>
+        <span><span class="mark">A</span> start</span>
+        <span><span class="mark">C</span> corner</span>
+        <span><span class="mark">S</span> speeding</span>
+        <span><span class="mark">P</span> phone</span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>Events</h3>
+      <ul id="eventList" class="feed"></ul>
+      <p id="noEvents" class="muted small" hidden>No risky events on this ride.</p>
+    </div>
+
+    <div class="row">
+      <button id="exportBtn" class="btn" type="button">Save ride data (JSON)</button>
+      <button id="homeBtn" class="btn primary" type="button">Done</button>
+    </div>
+    <p id="exportMsg" class="muted small" hidden></p>
+  </section>
+</main>
+<script src="scoring.js"></script>
+<script src="sim.js"></script>
+<script src="app.js"></script>
+<!-- BODY END -->
+</body>
+</html>

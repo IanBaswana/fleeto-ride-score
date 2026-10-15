@@ -11,6 +11,8 @@
 
   const STORE_KEY = "fleeto.rides.v1";
   const LIMIT_KEY = "fleeto.limit.v1";
+  const VOICE_KEY = "fleeto.voice.v1";
+  const RIDES_WITH_LOG = 5; // keep the full sensor log only for the newest rides, to stay within browser storage
   const MAX_SAVED_RIDES = 20;
   const DEMO_SPEEDUP = 30;
   // Set by the build for the preview page, so it can point to the phone version.
@@ -35,11 +37,15 @@
     try { return JSON.parse(localStorage.getItem(STORE_KEY)) || []; } catch (e) { return []; }
   }
   function saveRide(result) {
-    try {
-      const rides = loadRides();
-      rides.unshift(result);
-      localStorage.setItem(STORE_KEY, JSON.stringify(rides.slice(0, MAX_SAVED_RIDES)));
-    } catch (e) { /* storage full or blocked: the ride still shows, it is just not kept */ }
+    const rides = [result, ...loadRides()].slice(0, MAX_SAVED_RIDES);
+    const withoutLog = (r) => { const { log, ...rest } = r; return rest; };
+    // Try to keep logs for the newest rides; if storage is full, keep fewer.
+    for (const keep of [RIDES_WITH_LOG, 1, 0]) {
+      try {
+        localStorage.setItem(STORE_KEY, JSON.stringify(rides.map((r, i) => (i < keep ? r : withoutLog(r)))));
+        return;
+      } catch (e) { /* storage full or blocked: try with fewer logs */ }
+    }
   }
   function readLimit() {
     const v = Number($("limitInput").value);
@@ -121,6 +127,33 @@
     show("home");
   }
 
+  // ---------- Spoken alerts ----------
+
+  let audioCtx = null;
+  function beep() {
+    try {
+      audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+      const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.frequency.value = 880;
+      g.gain.value = 0.15;
+      o.connect(g).connect(audioCtx.destination);
+      o.start();
+      o.stop(audioCtx.currentTime + 0.2);
+    } catch (e) { /* no audio on this device */ }
+  }
+  // Short beep, then the words. Browsers allow sound only after a tap, so the first call is on Start.
+  function say(text) {
+    if (!$("voiceInput").checked) return;
+    beep();
+    try {
+      if (!("speechSynthesis" in window)) return;
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = "en-IN";
+      u.rate = 1.05;
+      speechSynthesis.speak(u);
+    } catch (e) { /* speech not supported */ }
+  }
+
   // ---------- Ride (live and demo share this) ----------
 
   function beginRide(mode) {
@@ -130,6 +163,8 @@
       startT: Date.now(),
       clockT: Date.now(),
       shownEvents: 0,
+      wasOver: false,
+      lastOverSayT: 0,
       gotMotion: false,
       lastMotionT: 0,
       timers: [],
@@ -156,6 +191,7 @@
       try { motionOk = (await DeviceMotionEvent.requestPermission()) === "granted"; } catch (e) { motionOk = false; }
     }
     const r = beginRide("live");
+    say("Ride started");
 
     if ("geolocation" in navigator) {
       r.watchId = navigator.geolocation.watchPosition(onPosition, onGeoError,
@@ -251,6 +287,7 @@
     const durationGuessMs = 15 * 60 * 1000;
     const data = window.RideSim.generateDemoRide(Date.now() - durationGuessMs);
     const r = beginRide("demo");
+    say("Demo ride started");
     r.demo = { data, fi: 0, mi: 0, simT: data.fixes[0].t - 1000 };
     r.startT = data.fixes[0].t;
     r.timers.push(setInterval(() => stepDemo(100 * DEMO_SPEEDUP), 100));
@@ -301,9 +338,18 @@
     $("r-fixes").textContent = `${ride.analyzer.fixes.length} / ${stats.rejectedFixes}`;
     if (ride.mode === "demo") $("r-acc").textContent = "simulated";
 
-    // Newest events first, at most four.
+    // Speak when the rider goes over the limit (at most every 30 s of ride time).
+    if (live.overLimit && !ride.wasOver && ride.clockT - ride.lastOverSayT > 30000) {
+      say(`Over ${ride.analyzer.cfg.speedLimitKmh}`);
+      ride.lastOverSayT = ride.clockT;
+    }
+    ride.wasOver = live.overLimit;
+
+    // Newest events first, at most four. Speak each new one (speeding was already announced above).
     const ev = ride.analyzer.events;
     if (ev.length !== ride.shownEvents) {
+      const fresh = ev.slice(ride.shownEvents).filter((e) => e.type !== "speeding");
+      if (fresh.length) say(fresh.map((e) => EVENT_INFO[e.type].name).join(", "));
       ride.shownEvents = ev.length;
       $("feed").replaceChildren(...ev.slice(-4).reverse().map((e) => eventItem(e, ride.startT)));
     }
@@ -341,7 +387,7 @@
 
     const result = r.analyzer.finish();
     result.mode = r.mode;
-    result.app = "fleeto-ride-score-prototype/0.1";
+    result.app = "fleeto-ride-score-prototype/0.2";
     if (r.analyzer.fixes.length > 1) saveRide(result);
     renderSummary(result);
   }
@@ -363,6 +409,9 @@
       : !sc.enoughData
         ? `Short ride (under ${CONFIG.minRideKm} km). Treat this score as a rough guide only.`
         : `Speed limit used: ${s.speedLimitKmh} km/h.`;
+    if (s.gapMin >= 0.5) {
+      $("sumNote").textContent += ` GPS was lost for ${Math.round(s.gapMin)} min (screen locked or app in the background), so part of the ride is missing.`;
+    }
 
     $("sumDist").textContent = `${s.distanceKm.toFixed(1)} km`;
     $("sumTime").textContent = fmtDuration(s.movingMin * 60);
@@ -390,6 +439,8 @@
     $("noEvents").hidden = r.events.length > 0;
     $("exportMsg").hidden = true;
     $("exportBtn").onclick = () => exportRide(r);
+    $("csvBtn").onclick = () => exportCsv(r);
+    $("shareBtn").onclick = () => shareScore(r);
     show("summary");
     drawMap(r);
   }
@@ -411,7 +462,7 @@
     if (!useMap) { drawRoute(r); return; }
 
     if (!leafletMap) {
-      leafletMap = L.map("routeMap", { zoomControl: true, attributionControl: true });
+      leafletMap = L.map("routeMap", { zoomControl: true, attributionControl: true, zoomSnap: 0.25 });
       L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
         maxZoom: 19,
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
@@ -505,9 +556,51 @@
     for (const e of r.events) if (e.lat != null) dot(e.lat, e.lon, col("--risky"), EVENT_INFO[e.type].letter);
   }
 
-  async function exportRide(r) {
-    const name = `fleeto-ride-${new Date(r.stats.startT || Date.now()).toISOString().slice(0, 16).replace(/[-:T]/g, "")}.json`;
-    const data = JSON.stringify(r, null, 1);
+  const fileStem = (r) => `fleeto-ride-${new Date(r.stats.startT || Date.now()).toISOString().slice(0, 16).replace(/[-:T]/g, "")}`;
+
+  function exportRide(r) {
+    return saveFile(`${fileStem(r)}.json`, JSON.stringify(r, null, 1), "application/json");
+  }
+
+  // One row per GPS fix, with the values the event rules use. Opens in Google Sheets or Excel.
+  function exportCsv(r) {
+    if (!r.log || !r.log.length) {
+      $("exportMsg").hidden = false;
+      $("exportMsg").textContent = "This ride has no sensor log. Only the newest rides keep one.";
+      return;
+    }
+    const t0 = r.log[0].t;
+    const eventsAt = r.log.map(() => []);
+    for (const e of r.events) {
+      let i = 0;
+      while (i + 1 < r.log.length && r.log[i + 1].t <= e.t) i++;
+      eventsAt[i].push(EVENT_INFO[e.type].name);
+    }
+    const head = "time,seconds_from_start,lat,lon,speed_kmh,gps_accuracy_m,heading_deg,speed_change_ms2,sideways_ms2,events";
+    const rows = r.log.map((f, i) => [new Date(f.t).toISOString(), ((f.t - t0) / 1000).toFixed(1), f.lat, f.lon, f.kmh,
+      f.acc ?? "", f.heading ?? "", f.accel ?? "", f.lateral ?? "", eventsAt[i].join("; ")].join(","));
+    return saveFile(`${fileStem(r)}.csv`, [head, ...rows].join("\n"), "text/csv");
+  }
+
+  async function shareScore(r) {
+    const s = r.stats, sc = r.score;
+    const text = [
+      `My Fleeto ride score: ${sc.overall ?? "–"}${sc.band ? ` (${sc.band.label})` : ""}`,
+      `${s.distanceKm.toFixed(1)} km, ${Math.round(s.movingMin)} min riding, top speed ${Math.round(s.maxKmh)} km/h`,
+      `Harsh brakes ${s.harshBrakes} · Harsh starts ${s.harshAccels} · Sharp corners ${s.harshCorners} · Speeding ${s.speedingEpisodes} · Phone use ${s.phoneEvents}`,
+      "(Fleeto prototype)",
+    ].join("\n");
+    if (navigator.share && !inFrame) {
+      try { await navigator.share({ text }); return; } catch (e) { if (e && e.name === "AbortError") return; }
+    }
+    // No share sheet (laptop or Claude preview): open WhatsApp with the text filled in.
+    const a = document.createElement("a");
+    a.href = `https://wa.me/?text=${encodeURIComponent(text)}`;
+    a.target = "_blank"; a.rel = "noopener";
+    document.body.append(a); a.click(); a.remove();
+  }
+
+  async function saveFile(name, data, type) {
     const msg = $("exportMsg");
     msg.hidden = false;
     if (inFrame && window.claude && window.claude.use) {
@@ -518,7 +611,7 @@
       return;
     }
     const a = document.createElement("a");
-    a.href = URL.createObjectURL(new Blob([data], { type: "application/json" }));
+    a.href = URL.createObjectURL(new Blob([data], { type }));
     a.download = name;
     document.body.append(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
@@ -533,6 +626,10 @@
     $("limitInput").value = v;
     try { localStorage.setItem(LIMIT_KEY, String(v)); } catch (e) { /* ignore */ }
     renderHome();
+  });
+  try { const v = localStorage.getItem(VOICE_KEY); if (v) $("voiceInput").checked = v === "on"; } catch (e) { /* ignore */ }
+  $("voiceInput").addEventListener("change", () => {
+    try { localStorage.setItem(VOICE_KEY, $("voiceInput").checked ? "on" : "off"); } catch (e) { /* ignore */ }
   });
   $("startBtn").addEventListener("click", startLive);
   $("demoBtn").addEventListener("click", startDemo);

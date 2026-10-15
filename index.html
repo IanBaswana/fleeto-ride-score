@@ -40,6 +40,10 @@
         <label for="limitInput"><h3>Speed limit</h3><span class="muted small">One limit for the whole ride. Placeholder until we add road data.</span></label>
         <div><input id="limitInput" type="number" inputmode="numeric" min="20" max="120" step="5" value="50"> <span class="muted">km/h</span></div>
       </div>
+      <div class="field">
+        <label for="voiceInput"><h3>Speak events out loud</h3><span class="muted small">The phone says "Harsh brake", "Over 50" and so on, so you can test without looking at the screen.</span></label>
+        <input id="voiceInput" class="toggle" type="checkbox" checked>
+      </div>
     </div>
 
     <div class="panel">
@@ -171,6 +175,10 @@
       <p id="noEvents" class="muted small" hidden>No risky events on this ride.</p>
     </div>
 
+    <div class="row">
+      <button id="shareBtn" class="btn" type="button">Share score</button>
+      <button id="csvBtn" class="btn" type="button">Save sensor log (CSV)</button>
+    </div>
     <div class="row">
       <button id="exportBtn" class="btn" type="button">Save ride data (JSON)</button>
       <button id="homeBtn" class="btn primary" type="button">Done</button>

@@ -1,6 +1,6 @@
 // Offline cache so the app opens with a weak signal. Bump VERSION when files change.
-const VERSION = "fleeto-ride-v3";
-const FILES = ["./", "index.html", "style.css", "scoring.js", "sim.js", "app.js", "manifest.webmanifest", "icon.svg"];
+const VERSION = "fleeto-ride-v4";
+const FILES = ["./", "index.html", "style.css", "scoring.js", "roads.js", "sim.js", "app.js", "manifest.webmanifest", "icon.svg"];
 self.addEventListener("install", (e) => e.waitUntil(caches.open(VERSION).then((c) => c.addAll(FILES))));
 self.addEventListener("activate", (e) => e.waitUntil(caches.keys().then((keys) =>
   Promise.all(keys.filter((k) => k !== VERSION).map((k) => caches.delete(k))))));

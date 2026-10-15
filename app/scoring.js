@@ -13,8 +13,8 @@
   "use strict";
 
   const CONFIG = {
-    // Speed. No road speed-limit data yet, so one limit applies to the whole ride.
-    speedLimitKmh: 50,          // PLACEHOLDER: typical Indian city limit is 40-60 km/h
+    // Speed. Each fix can carry the road's own limit (see roads.js); this one is the fallback.
+    speedLimitKmh: 50,          // PLACEHOLDER: used where no road limit is known
     severeOverKmh: 20,          // PLACEHOLDER: "severe" = limit + this
     speedingMinS: 3,            // an over-limit stretch must last this long to count as an episode
 
@@ -124,6 +124,7 @@
       this.totals = {
         distanceM: 0, movingS: 0, stoppedS: 0, gapS: 0,
         overLimitS: 0, severeS: 0, nightS: 0,
+        limitS: { posted: 0, "road type": 0, setting: 0 },  // moving time by where the limit came from
         continuousS: 0, longestContinuousS: 0, stopRunS: 0,
         maxKmh: 0, rejectedFixes: 0,
       };
@@ -134,17 +135,25 @@
       this.live = { accelMs2: 0, lateralMs2: 0, rotationDegS: 0, motionAccel: 0 };
     }
 
-    // fix: {t (ms), lat, lon, speed (m/s or null), heading (deg or null), accuracy (m)}
+    /*
+     * fix: {t (ms), lat, lon, speed (m/s or null), heading (deg or null), accuracy (m),
+     *       limitKmh (optional road limit), limitSource ("posted" | "road type"), road (optional name)}
+     */
     addFix(fix) {
       const c = this.cfg;
       const T = this.totals;
       if (fix.accuracy != null && fix.accuracy > c.maxFixAccuracyM) { T.rejectedFixes++; return; }
       const prev = this.fixes[this.fixes.length - 1];
       let kmh = fix.speed != null && fix.speed >= 0 ? fix.speed * 3.6 : null;
+      const limit = fix.limitKmh || c.speedLimitKmh;
+      const limitSource = fix.limitKmh ? fix.limitSource || "posted" : "setting";
 
       if (prev) {
         const dt = (fix.t - prev.t) / 1000;
         if (dt <= 0) return;
+        // Without a GPS speed we compute it from position. Over less than a second, position
+        // noise gives wild speeds (and fake harsh events), so wait for a later fix.
+        if (kmh == null && dt < 0.9) return;
         const d = haversineM(prev, fix);
         if (kmh == null) kmh = (d / dt) * 3.6;
         if ((d / dt) * 3.6 > c.maxPlausibleKmh) { T.rejectedFixes++; return; }
@@ -154,7 +163,7 @@
           this.window = [];
         } else {
           T.distanceM += d;
-          this._addTime(dt, (kmh + prev.kmh) / 2, fix);
+          this._addTime(dt, (kmh + prev.kmh) / 2, fix, limit, limitSource);
         }
       }
       // The very first fix often has no speed. Use 0 for display, but keep it out of
@@ -164,7 +173,8 @@
 
       let heading = fix.heading;
       if ((heading == null || isNaN(heading)) && prev && kmh > c.movingKmh) heading = bearingDeg(prev, fix);
-      const f = { t: fix.t, lat: fix.lat, lon: fix.lon, kmh, heading, acc: fix.accuracy };
+      const f = { t: fix.t, lat: fix.lat, lon: fix.lon, kmh, heading, acc: fix.accuracy,
+        limit, limitSource, road: fix.road || null };
       this.fixes.push(f);
       this.lastKmh = kmh;
       T.maxKmh = Math.max(T.maxKmh, kmh);
@@ -173,7 +183,7 @@
       if (speedKnown) this._detectDynamics(f);
     }
 
-    _addTime(dt, kmh, fix) {
+    _addTime(dt, kmh, fix, limit, limitSource) {
       const c = this.cfg;
       const T = this.totals;
       if (kmh >= c.movingKmh) {
@@ -181,8 +191,9 @@
         T.continuousS += dt;
         T.stopRunS = 0;
         T.longestContinuousS = Math.max(T.longestContinuousS, T.continuousS);
-        if (kmh > c.speedLimitKmh) T.overLimitS += dt;
-        if (kmh > c.speedLimitKmh + c.severeOverKmh) T.severeS += dt;
+        if (kmh > limit) T.overLimitS += dt;
+        if (kmh > limit + c.severeOverKmh) T.severeS += dt;
+        T.limitS[limitSource] += dt;
         if (isNight(fix.t, c)) T.nightS += dt;
       } else {
         T.stoppedS += dt;
@@ -193,9 +204,10 @@
 
     _updateSpeeding(f) {
       const c = this.cfg;
-      if (f.kmh > c.speedLimitKmh) {
-        if (!this.speeding) this.speeding = { start: f, maxKmh: f.kmh };
+      if (f.kmh > f.limit) {
+        if (!this.speeding) this.speeding = { start: f, maxKmh: f.kmh, maxOver: 0 };
         this.speeding.maxKmh = Math.max(this.speeding.maxKmh, f.kmh);
+        if (f.kmh - f.limit >= this.speeding.maxOver) { this.speeding.maxOver = f.kmh - f.limit; this.speeding.limit = f.limit; }
         this.speeding.end = f;
       } else {
         this._closeSpeeding();
@@ -210,7 +222,8 @@
       if (dur < this.cfg.speedingMinS) return;
       this.events.push({
         type: "speeding", t: s.start.t, lat: s.start.lat, lon: s.start.lon, kmh: s.maxKmh,
-        value: s.maxKmh, detail: `${Math.round(s.maxKmh)} km/h peak for ${Math.round(dur)} s`,
+        value: s.maxKmh, limit: s.limit,
+        detail: `${Math.round(s.maxKmh)} km/h peak in a ${s.limit} zone for ${Math.round(dur)} s`,
       });
     }
 
@@ -346,24 +359,31 @@
         motionAvailable: this.motion.samples > 0,
         rejectedFixes: T.rejectedFixes,
         speedLimitKmh: this.cfg.speedLimitKmh,
+        // Share of moving time by where the speed limit came from.
+        pctLimitPosted: T.movingS ? (100 * T.limitS.posted) / T.movingS : 0,
+        pctLimitRoadType: T.movingS ? (100 * T.limitS["road type"]) / T.movingS : 0,
       };
     }
 
     snapshot() {
       const s = this.stats();
+      const f = this.fixes[this.fixes.length - 1];
+      const limit = f ? f.limit : this.cfg.speedLimitKmh;
       return { stats: s, score: scoreRide(s, this.cfg), live: { ...this.live, kmh: this.lastKmh,
-        overLimit: this.lastKmh > this.cfg.speedLimitKmh } };
+        limitKmh: limit, limitSource: f ? f.limitSource : "setting", road: f ? f.road : null,
+        overLimit: this.lastKmh > limit } };
     }
 
     finish() {
       this._closeSpeeding();
       const s = this.stats();
       return { stats: s, score: scoreRide(s, this.cfg), events: this.events.slice().sort((a, b) => a.t - b.t),
-        route: this.fixes.map((f) => [f.lat, f.lon, Math.round(f.kmh)]), config: this.cfg,
+        route: this.fixes.map((f) => [f.lat, f.lon, Math.round(f.kmh), f.limit]), config: this.cfg,
         // Per-fix sensor log, for tuning thresholds against real rides.
         log: this.fixes.map((f) => ({ t: f.t, lat: +f.lat.toFixed(6), lon: +f.lon.toFixed(6), kmh: +f.kmh.toFixed(1),
           acc: f.acc == null ? null : Math.round(f.acc), heading: f.heading == null ? null : Math.round(f.heading),
-          accel: f.accel == null ? null : +f.accel.toFixed(2), lateral: f.lateral == null ? null : +f.lateral.toFixed(2) })) };
+          accel: f.accel == null ? null : +f.accel.toFixed(2), lateral: f.lateral == null ? null : +f.lateral.toFixed(2),
+          limit: f.limit, limitSource: f.limitSource, road: f.road })) };
     }
   }
 
@@ -379,10 +399,14 @@
     const overMin = Math.max(0, s.longestContinuousMin - cfg.maxContinuousMin);
     const r1 = (x) => Math.round(x * 10) / 10;
 
+    const roadPct = (s.pctLimitPosted || 0) + (s.pctLimitRoadType || 0);
     const raw = {
       speeding: {
         score: 100 - 2 * s.pctOverLimit - 4 * s.pctSevere,
-        measure: `${r1(s.pctOverLimit)}% of riding time above ${cfg.speedLimitKmh} km/h, ${r1(s.pctSevere)}% above ${cfg.speedLimitKmh + cfg.severeOverKmh}`,
+        measure: roadPct > 0
+          ? `${r1(s.pctOverLimit)}% of riding time above the road's limit, ${r1(s.pctSevere)}% more than ${cfg.severeOverKmh} km/h above. ` +
+            `Limits: ${Math.round(s.pctLimitPosted)}% posted, ${Math.round(s.pctLimitRoadType)}% typical for the road type, ${Math.max(0, Math.round(100 - roadPct))}% your ${cfg.speedLimitKmh} km/h setting`
+          : `${r1(s.pctOverLimit)}% of riding time above ${cfg.speedLimitKmh} km/h, ${r1(s.pctSevere)}% above ${cfg.speedLimitKmh + cfg.severeOverKmh}`,
         rule: "100 − 2 × % time over limit − 4 × % time severely over",
       },
       braking: {

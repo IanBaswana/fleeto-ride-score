@@ -37,8 +37,12 @@
 
     <div class="panel">
       <div class="field">
-        <label for="limitInput"><h3>Speed limit</h3><span class="muted small">One limit for the whole ride. Placeholder until we add road data.</span></label>
+        <label for="limitInput"><h3>Fallback speed limit</h3><span class="muted small">Used where no road is found, or when road limits are off.</span></label>
         <div><input id="limitInput" type="number" inputmode="numeric" min="20" max="120" step="5" value="50"> <span class="muted">km/h</span></div>
+      </div>
+      <div class="field">
+        <label for="roadsInput"><h3>Use road speed limits</h3><span class="muted small">Looks up each road's limit in OpenStreetMap. Where no limit is posted, it uses a typical limit for that type of road. This sends the map area around you (not your route) to the free Overpass service.</span></label>
+        <input id="roadsInput" class="toggle" type="checkbox" checked>
       </div>
       <div class="field">
         <label for="voiceInput"><h3>Speak events out loud</h3><span class="muted small">The phone says "Harsh brake", "Over 50" and so on, so you can test without looking at the screen.</span></label>
@@ -75,6 +79,7 @@
       <span id="gpsChip" class="chip">GPS: waiting</span>
       <span id="motionChip" class="chip">Motion: waiting</span>
       <span id="wakeChip" class="chip">Screen: –</span>
+      <span id="roadChip" class="chip">Roads: –</span>
       <span id="demoChip" class="chip warn" hidden>Demo ride, 30× speed</span>
     </div>
     <div id="rideNotice" class="notice error" hidden></div>
@@ -84,6 +89,7 @@
         <div id="speedBox" class="speed"><b id="speedNow" class="num">0</b><span>km/h</span></div>
         <div class="limit-sign" id="limitSign" title="Speed limit">50</div>
       </div>
+      <p id="roadInfo" class="muted small road-info"></p>
       <div class="stats3">
         <div class="stat"><span class="eyebrow">Time</span><b id="timeNow">0:00</b></div>
         <div class="stat"><span class="eyebrow">Distance</span><b id="distNow">0.0 km</b></div>
@@ -187,6 +193,7 @@
   </section>
 </main>
 <script src="scoring.js"></script>
+<script src="roads.js"></script>
 <script src="sim.js"></script>
 <script src="app.js"></script>
 <!-- BODY END -->

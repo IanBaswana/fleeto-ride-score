@@ -211,6 +211,15 @@ p { margin: 0; }
 .bar i { display: block; height: 100%; border-radius: 4px; }
 .comp .rule { font-size: 0.8rem; color: var(--muted); }
 .route { width: 100%; max-width: 100%; aspect-ratio: 4 / 3; border-radius: 10px; background: var(--bg); display: block; }
+#routeMap { z-index: 0; }
+#routeMap .leaflet-div-icon { background: none; border: 0; }
+.map-mark {
+  display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%;
+  font: 700 13px/1 var(--font-body); color: #fff; background: var(--risky);
+  border: 2px solid #fff; box-shadow: 0 1px 3px rgb(0 0 0 / 0.4);
+}
+.map-mark.end { background: var(--ink); color: var(--bg); }
+.gmaps { color: var(--accent-text); font-weight: 600; white-space: nowrap; }
 .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 0.8rem; color: var(--muted); }
 .legend i { display: inline-block; width: 14px; height: 4px; border-radius: 2px; vertical-align: middle; margin-right: 4px; }
 .mark {

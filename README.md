@@ -28,6 +28,13 @@ On the phone: Chrome (Android) or Safari (iPhone). Allow location and motion. Mo
 | `test/demo-ride.test.js` | `node test/demo-ride.test.js`: checks that each planted event is found once. |
 | `build-preview.js` | Builds the single-file preview page for Claude. |
 
+## Testing features
+
+- **Spoken alerts:** during a ride the phone beeps and says the event ("Harsh brake", "Over 50"). Turn it off on the home screen.
+- **Sensor log (CSV):** one row per GPS fix with speed, accuracy, heading, speed change and sideways acceleration, plus the events found at that moment. Open it in Google Sheets to tune thresholds. Only the 5 newest rides keep a log.
+- **Share score:** opens the phone's share sheet (WhatsApp etc.) with the ride score and event counts.
+- **GPS-lost warning:** the summary says how long GPS was lost, for example when the screen locked.
+
 ## How the score works
 
 Each behaviour gets a score from 0 to 100. The ride score is the weighted average. **All thresholds and weights are placeholders.**

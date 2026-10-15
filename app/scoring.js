@@ -231,6 +231,8 @@
       }
       this.live.accelMs2 = accel;
       this.live.lateralMs2 = lateral;
+      f.accel = accel;      // kept for the sensor log export
+      f.lateral = lateral;
 
       if (Math.max(f.kmh, old.kmh) < c.dynamicsMinKmh) return;
       if (accel <= -c.harshBrakeMs2) {
@@ -357,7 +359,11 @@
       this._closeSpeeding();
       const s = this.stats();
       return { stats: s, score: scoreRide(s, this.cfg), events: this.events.slice().sort((a, b) => a.t - b.t),
-        route: this.fixes.map((f) => [f.lat, f.lon, Math.round(f.kmh)]), config: this.cfg };
+        route: this.fixes.map((f) => [f.lat, f.lon, Math.round(f.kmh)]), config: this.cfg,
+        // Per-fix sensor log, for tuning thresholds against real rides.
+        log: this.fixes.map((f) => ({ t: f.t, lat: +f.lat.toFixed(6), lon: +f.lon.toFixed(6), kmh: +f.kmh.toFixed(1),
+          acc: f.acc == null ? null : Math.round(f.acc), heading: f.heading == null ? null : Math.round(f.heading),
+          accel: f.accel == null ? null : +f.accel.toFixed(2), lateral: f.lateral == null ? null : +f.lateral.toFixed(2) })) };
     }
   }
 

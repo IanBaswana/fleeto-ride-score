@@ -309,7 +309,7 @@
     }
   }
 
-  function eventItem(e, startT) {
+  function eventItem(e, startT, withMapLink) {
     const li = document.createElement("li");
     const info = EVENT_INFO[e.type];
     li.innerHTML = `<time class="num"></time><span class="mark"></span><span><b></b> <span class="muted"></span></span>`;
@@ -317,6 +317,14 @@
     li.querySelector(".mark").textContent = info.letter;
     li.querySelector("b").textContent = info.name;
     li.querySelector(".muted").textContent = e.detail;
+    if (withMapLink && e.lat != null) {
+      const a = document.createElement("a");
+      a.className = "gmaps small";
+      a.href = googleMapsUrl(e.lat, e.lon);
+      a.target = "_blank"; a.rel = "noopener";
+      a.textContent = "Map ↗";
+      li.append(a);
+    }
     return li;
   }
 
@@ -378,12 +386,77 @@
       return div;
     }));
 
-    $("eventList").replaceChildren(...r.events.map((e) => eventItem(e, s.startT || e.t)));
+    $("eventList").replaceChildren(...r.events.map((e) => eventItem(e, s.startT || e.t, true)));
     $("noEvents").hidden = r.events.length > 0;
     $("exportMsg").hidden = true;
     $("exportBtn").onclick = () => exportRide(r);
     show("summary");
-    drawRoute(r);
+    drawMap(r);
+  }
+
+  // Opens the spot in the Google Maps app on phones, or google.com/maps on a laptop. No API key needed.
+  function googleMapsUrl(lat, lon) {
+    return `https://www.google.com/maps/search/?api=1&query=${lat.toFixed(6)},${lon.toFixed(6)}`;
+  }
+
+  // Street map (OpenStreetMap tiles via Leaflet). Falls back to the plain canvas drawing
+  // when Leaflet did not load (offline) or inside the Claude preview, which blocks map tiles.
+  let leafletMap = null;
+  function drawMap(r) {
+    const pts = r.route || [];
+    const useMap = window.L && !inFrame && pts.length >= 2;
+    $("routeMap").hidden = !useMap;
+    $("routeCanvas").hidden = useMap;
+    $("mapHint").hidden = !useMap;
+    if (!useMap) { drawRoute(r); return; }
+
+    if (!leafletMap) {
+      leafletMap = L.map("routeMap", { zoomControl: true, attributionControl: true });
+      L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19,
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+      }).addTo(leafletMap);
+    }
+    if (leafletMap._rideLayer) leafletMap.removeLayer(leafletMap._rideLayer);
+    const layer = L.layerGroup().addTo(leafletMap);
+    leafletMap._rideLayer = layer;
+
+    const css = getComputedStyle(document.documentElement);
+    const col = (name) => css.getPropertyValue(name).trim();
+    // One polyline per run of points on the same side of the speed limit.
+    let run = [pts[0]];
+    const flush = (over) => {
+      if (run.length > 1) L.polyline(run.map((p) => [p[0], p[1]]), { color: over ? col("--high") : col("--good"), weight: 6, opacity: 0.9 }).addTo(layer);
+    };
+    // A segment takes the colour of the speed at its end point, as in the canvas drawing.
+    const isOver = (p) => p[2] > r.stats.speedLimitKmh;
+    let runOver = isOver(pts[1]);
+    for (let i = 1; i < pts.length; i++) {
+      if (isOver(pts[i]) !== runOver) { flush(runOver); run = [pts[i - 1]]; runOver = isOver(pts[i]); }
+      run.push(pts[i]);
+    }
+    flush(runOver);
+
+    const marker = (lat, lon, label, cls, title, detail) => {
+      const icon = L.divIcon({ className: "", html: `<div class="map-mark ${cls}">${label}</div>`, iconSize: [26, 26], iconAnchor: [13, 13] });
+      const m = L.marker([lat, lon], { icon, title }).addTo(layer);
+      const box = document.createElement("div");
+      const b = document.createElement("b"); b.textContent = title;
+      const d = document.createElement("div"); d.textContent = detail || "";
+      const a = document.createElement("a");
+      a.href = googleMapsUrl(lat, lon); a.target = "_blank"; a.rel = "noopener"; a.textContent = "Open in Google Maps ↗";
+      box.append(b, d, a);
+      m.bindPopup(box);
+    };
+    const first = pts[0], last = pts[pts.length - 1];
+    marker(first[0], first[1], "▶", "end", "Start", "");
+    marker(last[0], last[1], "■", "end", "End", "");
+    for (const e of r.events) {
+      if (e.lat != null) marker(e.lat, e.lon, EVENT_INFO[e.type].letter, "", EVENT_INFO[e.type].name, e.detail);
+    }
+
+    leafletMap.invalidateSize();
+    leafletMap.fitBounds(L.latLngBounds(pts.map((p) => [p[0], p[1]])), { paddingTopLeft: [52, 24], paddingBottomRight: [24, 24] });
   }
 
   function drawRoute(r) {

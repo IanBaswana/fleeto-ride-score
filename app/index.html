@@ -11,6 +11,9 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;600&family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Mono&display=swap">
+<!-- Street map for the ride summary. If it fails to load (offline), the app draws a plain route instead. -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -148,7 +151,9 @@
 
     <div class="panel">
       <h3>Route</h3>
+      <div id="routeMap" class="route" hidden></div>
       <canvas id="routeCanvas" class="route" width="800" height="600" aria-label="Route of the ride with event markers"></canvas>
+      <p id="mapHint" class="muted small" hidden>Tap a marker or an event below to open that spot in Google Maps.</p>
       <div class="legend">
         <span><i style="background:var(--good)"></i>At or under limit</span>
         <span><i style="background:var(--high)"></i>Over limit</span>

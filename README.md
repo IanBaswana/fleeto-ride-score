@@ -21,7 +21,7 @@ On the phone: Chrome (Android) or Safari (iPhone). Allow location and motion. Mo
 | File | What it does |
 |---|---|
 | `app/scoring.js` | All detection and scoring rules. No browser code. Thresholds and weights are in `CONFIG` and `COMPONENTS` at the top. |
-| `app/app.js` | Reads sensors (geolocation, devicemotion, wake lock), feeds the analyzer, draws the screens. |
+| `app/app.js` | Reads sensors (geolocation, devicemotion, wake lock), feeds the analyzer, draws the screens. The ride summary shows the route on an OpenStreetMap street map (Leaflet), with Google Maps links for each event. |
 | `app/sim.js` | Synthetic 15-minute ride with five planted events, for the demo and the test. |
 | `app/index.html`, `style.css` | Screens and styles. |
 | `app/sw.js`, `manifest.webmanifest`, `icon.svg` | Installable app and offline cache. |
